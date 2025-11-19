@@ -1,145 +1,99 @@
 import requests
+import streamlit as st
 from config import Config
 from datetime import datetime
 
 class WeatherService:
+    
+    # We now pass 'unit' as an argument to force the cache to refresh when units change
     @staticmethod
-    def get_weather_data(city_name):
-        """
-        Get current weather data for a city
-        """
+    @st.cache_data(ttl=600)
+    def get_weather_data(city_name, unit):
         try:
-            # API endpoint for current weather
             url = f"{Config.BASE_URL}/weather"
-            
-            # Parameters for the API request
             params = {
                 'q': city_name,
                 'appid': Config.OPENWEATHER_API_KEY,
-                'units': Config.TEMP_UNIT,
+                'units': unit,
                 'lang': 'en'
             }
-            
-            # Make the API request
             response = requests.get(url, params=params)
-            response.raise_for_status()
-            
-            return response.json()
-            
-        except requests.exceptions.RequestException as e:
-            print(f"Error fetching weather data: {e}")
+            if response.status_code == 200:
+                return response.json()
+            return {'cod': response.status_code, 'message': response.json().get('message')}
+        except requests.exceptions.RequestException:
             return None
 
     @staticmethod
-    def get_weather_by_coords(lat, lon):
-        """
-        Get weather data by coordinates
-        """
+    @st.cache_data(ttl=600)
+    def get_weather_by_coords(lat, lon, unit):
         try:
             url = f"{Config.BASE_URL}/weather"
             params = {
                 'lat': lat,
                 'lon': lon,
                 'appid': Config.OPENWEATHER_API_KEY,
-                'units': Config.TEMP_UNIT,
-                'lang': 'en'
+                'units': unit,
             }
-            
             response = requests.get(url, params=params)
             response.raise_for_status()
-            
             return response.json()
-            
-        except requests.exceptions.RequestException as e:
-            print(f"Error fetching weather data by coords: {e}")
+        except Exception:
             return None
 
     @staticmethod
-    def get_forecast_data(city_name):
-        """
-        Get 5-day forecast data for charts
-        """
+    @st.cache_data(ttl=600)
+    def get_forecast_data(city_name, unit):
         try:
             url = f"{Config.BASE_URL}/forecast"
             params = {
                 'q': city_name,
                 'appid': Config.OPENWEATHER_API_KEY,
-                'units': Config.TEMP_UNIT,
-                'lang': 'en'
+                'units': unit,
             }
-            
             response = requests.get(url, params=params)
-            response.raise_for_status()
-            
-            return response.json()
-            
-        except requests.exceptions.RequestException as e:
-            print(f"Error fetching forecast data: {e}")
+            if response.status_code == 200:
+                return response.json()
+            return None
+        except Exception:
             return None
 
     @staticmethod
-    def parse_weather_data(weather_data):
-        """
-        Parse the weather data into a friendly format
-        """
-        if not weather_data:
+    def parse_weather_data(data):
+        if not data or 'main' not in data:
             return None
-            
-        try:
-            main = weather_data['main']
-            weather = weather_data['weather'][0]
-            wind = weather_data.get('wind', {})
-            sys = weather_data.get('sys', {})
-            
-            # Convert sunrise/sunset timestamps
-            sunrise = datetime.fromtimestamp(sys.get('sunrise', 0)).strftime('%H:%M') if sys.get('sunrise') else 'N/A'
-            sunset = datetime.fromtimestamp(sys.get('sunset', 0)).strftime('%H:%M') if sys.get('sunset') else 'N/A'
-            
-            parsed_data = {
-                'city': weather_data['name'],
-                'country': weather_data['sys']['country'],
-                'temperature': main['temp'],
-                'feels_like': main['feels_like'],
-                'humidity': main['humidity'],
-                'pressure': main['pressure'],
-                'description': weather['description'].title(),
-                'icon': weather['icon'],
-                'wind_speed': wind.get('speed', 0),
-                'visibility': weather_data.get('visibility', 0),
-                'sunrise': sunrise,
-                'sunset': sunset,
-                'clouds': weather_data.get('clouds', {}).get('all', 0)
-            }
-            
-            return parsed_data
-            
-        except KeyError as e:
-            print(f"Error parsing weather data: {e}")
-            return None
+        
+        sys = data.get('sys', {})
+        coord = data.get('coord', {})
+        sunrise = datetime.fromtimestamp(sys.get('sunrise', 0)).strftime('%H:%M')
+        sunset = datetime.fromtimestamp(sys.get('sunset', 0)).strftime('%H:%M')
+        
+        return {
+            'city': data.get('name'),
+            'country': sys.get('country'),
+            'lat': coord.get('lat'),
+            'lon': coord.get('lon'),
+            'temperature': data['main']['temp'],
+            'feels_like': data['main']['feels_like'],
+            'humidity': data['main']['humidity'],
+            'pressure': data['main']['pressure'],
+            'description': data['weather'][0]['description'].title(),
+            'icon': data['weather'][0]['icon'],
+            'wind_speed': data.get('wind', {}).get('speed', 0),
+            'clouds': data.get('clouds', {}).get('all', 0),
+            'sunrise': sunrise,
+            'sunset': sunset
+        }
 
     @staticmethod
-    def parse_forecast_data(forecast_data):
-        """
-        Parse forecast data for temperature trends
-        """
-        if not forecast_data or 'list' not in forecast_data:
+    def parse_forecast_data(data):
+        if not data or 'list' not in data:
             return None
             
-        try:
-            temperatures = []
-            times = []
+        temps = []
+        times = []
+        for item in data['list'][:8]:
+            temps.append(item['main']['temp'])
+            times.append(datetime.fromtimestamp(item['dt']).strftime('%H:%M'))
             
-            for item in forecast_data['list'][:8]:  # Next 24 hours (3-hour intervals)
-                temps = item['main']['temp']
-                time_str = datetime.fromtimestamp(item['dt']).strftime('%H:%M')
-                temperatures.append(temps)
-                times.append(time_str)
-                
-            return {
-                'times': times,
-                'temperatures': temperatures
-            }
-            
-        except KeyError as e:
-            print(f"Error parsing forecast data: {e}")
-            return None
+        return {'times': times, 'temperatures': temps}
